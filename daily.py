@@ -1,28 +1,13 @@
-#!/usr/bin/env python3
-'''
-This script fetches a random LeetCode problem and sends it as a Microsoft Teams message via an incoming webhook, ensuring uniqueness by tracking asked question IDs, skipping premium problems, and loading configuration from a JSON file.
-It formats the payload according to the Teams webhook schema using an Adaptive Card with a clickable button.
-
-Usage:
-    1. Create an Incoming Webhook in your Microsoft Teams channel and copy its URL.
-    2. In the same directory as this script, create a file named `config.json` with the following content:
-       {
-           "teams_webhook_url": "<your_webhook_url>"
-       }
-    3. Install dependencies:
-       pip install requests
-    4. Run the script:
-       python3 random_leetcode_teams.py
-'''
-
 import os
 import sys
 import requests
 import random
 import json
 
-ASKED_FILE = 'asked_questions.json'
-CONFIG_FILE = 'config.json'
+# Use /data volume for persistent files
+DATA_DIR = os.getenv('DATA_DIR', '/data')
+ASKED_FILE = os.path.join(DATA_DIR, 'asked_questions.json')
+CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 
 
 def load_config():
@@ -33,11 +18,11 @@ def load_config():
         try:
             cfg = json.load(f)
         except json.JSONDecodeError:
-            print(f"Error: Configuration file '{CONFIG_FILE}' is not valid JSON.", file=sys.stderr)
+            print(f"Error: '{CONFIG_FILE}' is not valid JSON.", file=sys.stderr)
             sys.exit(1)
     url = cfg.get('teams_webhook_url')
     if not url:
-        print(f"Error: 'teams_webhook_url' not set in '{CONFIG_FILE}'.", file=sys.stderr)
+        print(f"Error: 'teams_webhook_url' missing in '{CONFIG_FILE}'.", file=sys.stderr)
         sys.exit(1)
     return url
 
@@ -58,17 +43,14 @@ def save_asked(asked):
 
 
 def fetch_problems():
-    '''Fetches all LeetCode problems via the public API endpoint.'''
     url = 'https://leetcode.com/api/problems/all/'
     headers = {'User-Agent': 'RandomLeetCodeTeamsScript/1.0'}
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
-    data = resp.json()
-    return data.get('stat_status_pairs', [])
+    return resp.json().get('stat_status_pairs', [])
 
 
 def pick_random_problem(problems, asked):
-    '''Selects a random non-premium problem, avoiding repeats.'''
     non_premium = [p for p in problems if not p.get('paid_only', False)]
     if not non_premium:
         raise ValueError('No non-premium problems available.')
@@ -89,8 +71,7 @@ def pick_random_problem(problems, asked):
     return qid, title, diff, link
 
 
-def send_teams_message(webhook_url, qid, title, difficulty, link, num_asked):
-    '''Sends an Adaptive Card formatted payload to Teams with a clickable button.'''
+def send_teams_message(webhook_url, qid, title, difficulty, link, count):
     payload = {
         "type": "object",
         "attachments": [
@@ -103,7 +84,7 @@ def send_teams_message(webhook_url, qid, title, difficulty, link, num_asked):
                     "body": [
                         {
                             "type": "TextBlock",
-                            "text": f"Daily Code Question (Day #{num_asked}) \nLeetCode #{qid}: {title} ({difficulty})",
+                            "text": f"Daily Code Question (#{count})\nLeetCode #{qid}: {title} ({difficulty})",
                             "wrap": True,
                             "weight": "Bolder",
                             "size": "Medium"
@@ -128,6 +109,7 @@ def main():
     webhook_url = load_config()
     problems = fetch_problems()
     asked = load_asked()
+
     qid, title, difficulty, link = pick_random_problem(problems, asked)
     asked.append(qid)
     save_asked(asked)
