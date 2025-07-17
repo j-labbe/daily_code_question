@@ -1,3 +1,5 @@
 {
-    "teams_webhook_url": "<your_teams_webhook_url>"
+    "teams_webhook_url": "<your_teams_webhook_url>",
+    "sql_teams_webhook_url": "<your_sql_webhook_url>",
+    "admin_token": "<admin_token>"
 }

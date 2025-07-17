@@ -3,10 +3,12 @@ import sys
 import requests
 import random
 import json
+from leaderboard import update_scores
 
 # Use /data volume for persistent files
 DATA_DIR = os.getenv('DATA_DIR', '/data')
 ASKED_FILE = os.path.join(DATA_DIR, 'asked_questions.json')
+ASKED_SQL_FILE = os.path.join(DATA_DIR, 'asked_sql_questions.json')
 CONFIG_FILE = os.path.join(DATA_DIR, 'config.json')
 
 
@@ -21,15 +23,19 @@ def load_config():
             print(f"Error: '{CONFIG_FILE}' is not valid JSON.", file=sys.stderr)
             sys.exit(1)
     url = cfg.get('teams_webhook_url')
+    sql_url = cfg.get('sql_teams_webhook_url')
     if not url:
         print(f"Error: 'teams_webhook_url' missing in '{CONFIG_FILE}'.", file=sys.stderr)
         sys.exit(1)
-    return url
+    if not sql_url:
+        print(f"Error: 'sql_teams_webhook_url' missing in '{CONFIG_FILE}'.", file=sys.stderr)
+        sys.exit(1)
+    return url, sql_url
 
 
-def load_asked():
-    if os.path.exists(ASKED_FILE):
-        with open(ASKED_FILE, 'r') as f:
+def load_asked(path):
+    if os.path.exists(path):
+        with open(path, 'r') as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
@@ -37,13 +43,12 @@ def load_asked():
     return []
 
 
-def save_asked(asked):
-    with open(ASKED_FILE, 'w') as f:
+def save_asked(asked, path):
+    with open(path, 'w') as f:
         json.dump(asked, f)
 
 
-def fetch_problems():
-    url = 'https://leetcode.com/api/problems/all/'
+def fetch_problems(url):
     headers = {'User-Agent': 'RandomLeetCodeTeamsScript/1.0'}
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
@@ -71,7 +76,7 @@ def pick_random_problem(problems, asked):
     return qid, title, diff, link
 
 
-def send_teams_message(webhook_url, qid, title, difficulty, link, count):
+def send_teams_message(webhook_url, qid, title, difficulty, link, count, category):
     payload = {
         "type": "object",
         "attachments": [
@@ -84,7 +89,7 @@ def send_teams_message(webhook_url, qid, title, difficulty, link, count):
                     "body": [
                         {
                             "type": "TextBlock",
-                            "text": f"Daily Code Question (#{count})\nLeetCode #{qid}: {title} ({difficulty})",
+                            "text": f"Daily {category} Question (#{count})\nLeetCode #{qid}: {title} ({difficulty})",
                             "wrap": True,
                             "weight": "Bolder",
                             "size": "Medium"
@@ -106,17 +111,32 @@ def send_teams_message(webhook_url, qid, title, difficulty, link, count):
 
 
 def main():
-    webhook_url = load_config()
-    problems = fetch_problems()
-    asked = load_asked()
+    code_url, sql_url = load_config()
+    code_problems = fetch_problems('https://leetcode.com/api/problems/algorithms/')
+    sql_problems = fetch_problems('https://leetcode.com/api/problems/database/')
 
-    qid, title, difficulty, link = pick_random_problem(problems, asked)
-    asked.append(qid)
-    save_asked(asked)
-    count = len(asked)
+    asked_code = load_asked(ASKED_FILE)
+    asked_sql = load_asked(ASKED_SQL_FILE)
 
-    send_teams_message(webhook_url, qid, title, difficulty, link, count)
-    print(f"Sent question #{qid} ({title}) to Microsoft Teams.")
+    qid, title, difficulty, link = pick_random_problem(code_problems, asked_code)
+    asked_code.append(qid)
+    save_asked(asked_code, ASKED_FILE)
+    count_code = len(asked_code)
+    send_teams_message(code_url, qid, title, difficulty, link, count_code, 'Code')
+    print(f"Sent code question #{qid} ({title}) to Microsoft Teams.")
+
+    sqid, stitle, sdiff, slink = pick_random_problem(sql_problems, asked_sql)
+    asked_sql.append(sqid)
+    save_asked(asked_sql, ASKED_SQL_FILE)
+    count_sql = len(asked_sql)
+    send_teams_message(sql_url, sqid, stitle, sdiff, slink, count_sql, 'SQL')
+    print(f"Sent SQL question #{sqid} ({stitle}) to Microsoft Teams.")
+
+    try:
+        scores = update_scores()
+        print("Updated leaderboard scores.")
+    except Exception as e:
+        print(f"Failed to update leaderboard: {e}", file=sys.stderr)
 
 
 if __name__ == '__main__':
